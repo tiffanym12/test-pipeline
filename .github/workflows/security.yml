@@ -23,12 +23,18 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v6
 
-      - name: Validate project files
+      - name: Diagnose project files
         run: |
-          test -f Dockerfile
-          test -f app.py
-          test -f requirements.txt
-          test -f pyproject.toml
+          echo "Repository root: $(pwd)"
+          ls -la
+
+          for file in Dockerfile app.py requirements.txt pyproject.toml; do
+            if [ -f "$file" ]; then
+              echo "PASS: $file"
+            else
+              echo "MISSING: $file"
+            fi
+          done
 
   # ==========================================================
   # STAGE 1 - PYTHON QUALITY
