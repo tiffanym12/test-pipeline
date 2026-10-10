@@ -1,12 +1,28 @@
+name: Security Pipeline
+
+'on':
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
+  # ==========================================================
+  # STAGE 0 - SETUP
+  # ==========================================================
   setup:
     name: "Stage 0 - Setup"
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v6
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Checkout source
+        uses: actions/checkout@v6
+
       - name: Validate project files
         run: |
           test -f Dockerfile
@@ -14,169 +30,295 @@ jobs:
           test -f requirements.txt
           test -f pyproject.toml
 
+  # ==========================================================
+  # STAGE 1 - PYTHON QUALITY
+  # ==========================================================
   python-quality:
     name: "Stage 1 - Python Quality"
     needs: setup
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v6
-      - name: Install Python
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
         run: uv python install 3.12
+
       - name: Install dependencies
         run: uv sync --dev
-      - name: Format
+
+      - name: Format Python
         run: uv run ruff format .
-      - name: Apply lint fixes
+
+      - name: Apply Ruff fixes
         run: uv run ruff check --fix .
-      - name: Type check
+
+      - name: Type check with mypy
         run: uv run mypy app.py
+
       - name: Verify formatting
         run: uv run ruff format --check .
-      - name: Verify lint
+
+      - name: Verify Ruff lint
         run: uv run ruff check .
+
       - name: Check for uncommitted fixes
         run: git diff --exit-code
 
+  # ==========================================================
+  # STAGE 2 - DOCKERFILE LINT
+  # ==========================================================
   docker-lint:
     name: "Stage 2 - Docker Lint"
     needs: setup
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
+
       - name: Run Hadolint
+        continue-on-error: true
         run: |
-          docker run --rm -i hadolint/hadolint \
-            hadolint --format json - < Dockerfile > hadolint.json
-      - uses: actions/upload-artifact@v6
+          docker run --rm -i hadolint/hadolint:latest \
+            --format json - < Dockerfile > hadolint.json
+
+      - name: Upload Hadolint report
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: hadolint-report
           path: hadolint.json
           if-no-files-found: ignore
 
+  # ==========================================================
+  # STAGE 3 - SAST AND SECRET SCANNING
+  # ==========================================================
   sast:
     name: "Stage 3 - SAST and Secrets"
     needs: setup
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
+
       - name: Run Semgrep
+        continue-on-error: true
         run: |
-          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
-            semgrep scan --config auto --json --output semgrep.json .
-      - uses: actions/upload-artifact@v6
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            semgrep/semgrep \
+            semgrep scan --config auto \
+            --json --output semgrep.json .
+
+      - name: Upload Semgrep report
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: semgrep-report
           path: semgrep.json
           if-no-files-found: ignore
+
+      - name: Set up Python for Bandit
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
       - name: Run Bandit
-        run: pipx run bandit -r app.py -f json -o bandit.json
-      - uses: actions/upload-artifact@v6
+        continue-on-error: true
+        run: |
+          python -m pip install bandit
+          bandit -r app.py -f json -o bandit.json
+
+      - name: Upload Bandit report
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: bandit-report
           path: bandit.json
           if-no-files-found: ignore
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Run Gitleaks
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks:latest \
+            detect --source . \
+            --report-format json \
+            --report-path gitleaks.json \
+            --exit-code 0
+
+      - name: Upload Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: gitleaks-report
+          path: gitleaks.json
+          if-no-files-found: ignore
+
+  # ==========================================================
+  # STAGE 4 - CONTAINER SECURITY AND SBOMS
+  # ==========================================================
   container-security:
     name: "Stage 4 - Container Security and SBOM"
-    needs:
-      - python-quality
-      - docker-lint
-      - sast
+    needs: setup
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
-      - name: Build image
-        run: docker build -t test:ci .
+
+      - name: Build Docker image
+        run: docker build -t test-project:ci .
+
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@v0
+
       - name: Generate SPDX SBOM
-        run: syft test:ci -o spdx-json=sbom-spdx.json
+        run: |
+          syft test-project:ci \
+            -o spdx-json=sbom-spdx.json
+
       - name: Generate CycloneDX SBOM
-        run: syft test:ci -o cyclonedx-json=sbom-cyclonedx.json
-      - uses: actions/upload-artifact@v6
+        run: |
+          syft test-project:ci \
+            -o cyclonedx-json=sbom-cyclonedx.json
+
+      - name: Upload SBOMs
+        if: always()
+        uses: actions/upload-artifact@v6
         with:
-          name: test-sboms
+          name: test-project-sboms
           path: |
             sbom-spdx.json
             sbom-cyclonedx.json
-      - name: Trivy image scan
+          if-no-files-found: ignore
+
+      - name: Run Trivy image scan
+        continue-on-error: true
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$PWD:/reports" \
             aquasec/trivy:latest image \
-            --format json --output /reports/trivy-image.json test:ci
-      - uses: actions/upload-artifact@v6
+            --format json \
+            --output /reports/trivy-image.json \
+            test-project:ci
+
+      - name: Upload Trivy image report
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: trivy-image-report
           path: trivy-image.json
           if-no-files-found: ignore
 
+      - name: Run Trivy filesystem scan
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" -w /work \
+            aquasec/trivy:latest fs \
+            --format json \
+            --output trivy-fs.json \
+            .
+
+      - name: Upload Trivy filesystem report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: trivy-fs-report
+          path: trivy-fs.json
+          if-no-files-found: ignore
+
+  # ==========================================================
+  # STAGE 5 - DAST
+  # ==========================================================
   dast:
-    name: "Stage 5 - Dynamic Application Security Testing"
-    needs: container-security
+    name: "Stage 5 - DAST (OWASP ZAP)"
+    needs: setup
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
-      - name: Build image
-        run: docker build -t test:ci .
+
+      - name: Build Docker image
+        run: docker build -t test-project:ci .
+
       - name: Start application
-        run: docker run -d --rm --name test -p 8080:8080 test:ci
+        run: |
+          docker run -d --rm \
+            --name test-project \
+            -p 8080:8080 \
+            test-project:ci
+
       - name: Wait for application
         run: |
           for i in $(seq 1 30); do
-            curl --fail http://127.0.0.1:8080/ && exit 0
+            if curl --fail http://127.0.0.1:8080/; then
+              exit 0
+            fi
             sleep 2
           done
-          docker logs test
+
+          docker logs test-project
           exit 1
-      - name: Run ZAP baseline
+
+      - name: Prepare report directory
+        run: mkdir -p zap-reports
+
+      - name: Run ZAP baseline scan
         continue-on-error: true
         run: |
-          mkdir -p zap-reports
           docker run --rm --network host \
             -v "$PWD/zap-reports:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py -t http://127.0.0.1:8080 \
-            -J zap-report.json -r zap-report.html -I
-      - uses: actions/upload-artifact@v6
+            zap-baseline.py \
+            -t http://127.0.0.1:8080 \
+            -J zap-report.json \
+            -r zap-report.html \
+            -I
+
+      - name: Upload ZAP report
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: zap-report
           path: zap-reports/
           if-no-files-found: ignore
+
       - name: Stop application
         if: always()
-        run: docker rm -f test || true
+        run: docker rm -f test-project || true
 
+  # ==========================================================
+  # STAGE 6 - SONARQUBE
+  # ==========================================================
   sonarqube:
     name: "Stage 6 - SonarQube"
-    needs:
-      - python-quality
-      - sast
-    if: ${{ always() && vars.SONAR_ENABLED == 'true' }}
+    needs: setup
+    if: ${{ vars.SONAR_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: SonarSource/sonarqube-scan-action@v7
+
+      - name: Run SonarQube analysis
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
+  # ==========================================================
+  # STAGE 7 - FINAL FINDINGS SUMMARY
+  # ==========================================================
   summarize-findings:
-    name: "Stage 7 - Final Security Summary"
-    if: always()
+    name: "Stage 7 - Security Summary"
+    if: ${{ always() }}
     needs:
       - setup
       - python-quality
@@ -185,16 +327,23 @@ jobs:
       - container-security
       - dast
       - sonarqube
+
     runs-on: ubuntu-latest
+
+    permissions:
+      actions: read
+      contents: read
+
     steps:
-      - name: Download reports
+      - name: Download all workflow artifacts
         uses: actions/download-artifact@v6
         with:
           path: scan-artifacts
-          pattern: '*-report'
+          pattern: "*"
           merge-multiple: false
         continue-on-error: true
-      - name: Publish stage results
+
+      - name: Summarize job results and findings
         env:
           SETUP: ${{ needs.setup.result }}
           PYTHON: ${{ needs.python-quality.result }}
@@ -204,23 +353,157 @@ jobs:
           DAST: ${{ needs.dast.result }}
           SONAR: ${{ needs.sonarqube.result }}
         run: |
-          {
-            echo "# Security Pipeline Summary"
-            echo
-            echo "| Stage | Result |"
-            echo "|---|---|"
-            echo "| Setup | $SETUP |"
-            echo "| Python Quality | $PYTHON |"
-            echo "| Docker Lint | $DOCKER |"
-            echo "| SAST and Secrets | $SAST |"
-            echo "| Container Security and SBOM | $CONTAINER |"
-            echo "| DAST | $DAST |"
-            echo "| SonarQube | $SONAR |"
-            echo
-            echo "Reports are available in the workflow artifacts."
-          } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v6
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("scan-artifacts")
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+
+          jobs = {
+              "Setup": os.environ["SETUP"],
+              "Python quality (uv/Ruff/mypy)": os.environ["PYTHON"],
+              "Docker lint (Hadolint)": os.environ["DOCKER"],
+              "SAST and secrets": os.environ["SAST"],
+              "Container security and SBOM": os.environ["CONTAINER"],
+              "DAST (OWASP ZAP)": os.environ["DAST"],
+              "SonarQube": os.environ["SONAR"],
+          }
+
+          lines = [
+              "# Security Pipeline Summary",
+              "",
+              f"Repository: {os.environ['GITHUB_REPOSITORY']}",
+              f"Run: {os.environ['GITHUB_SERVER_URL']}/"
+              f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}",
+              "",
+              "## Stage results",
+              "",
+              "| Stage | Result |",
+              "|---|---|",
+          ]
+
+          for name, result in jobs.items():
+              lines.append(f"| {name} | **{result}** |")
+
+          counts = {
+              "Hadolint findings": 0,
+              "Semgrep findings": 0,
+              "Bandit findings": 0,
+              "Gitleaks findings": 0,
+              "Trivy vulnerabilities": 0,
+              "Trivy misconfigurations": 0,
+              "Trivy secret findings": 0,
+              "ZAP alerts": 0,
+          }
+
+          reports = 0
+          warnings = []
+
+          for file in root.rglob("*.json") if root.exists() else []:
+              reports += 1
+              try:
+                  data = json.loads(file.read_text())
+                  name = file.name.lower()
+
+                  if "hadolint" in name:
+                      if isinstance(data, list):
+                          counts["Hadolint findings"] += len(data)
+
+                  elif "semgrep" in name:
+                      counts["Semgrep findings"] += len(
+                          data.get("results", [])
+                      )
+
+                  elif "bandit" in name:
+                      counts["Bandit findings"] += len(
+                          data.get("results", [])
+                      )
+
+                  elif "gitleaks" in name:
+                      if isinstance(data, list):
+                          counts["Gitleaks findings"] += len(data)
+
+                  elif "trivy" in name:
+                      for result in data.get("Results", []) or []:
+                          counts["Trivy vulnerabilities"] += len(
+                              result.get("Vulnerabilities") or []
+                          )
+                          counts["Trivy misconfigurations"] += len(
+                              result.get("Misconfigurations") or []
+                          )
+                          counts["Trivy secret findings"] += len(
+                              result.get("Secrets") or []
+                          )
+
+                  elif "zap" in name:
+                      for site in data.get("site", []) or []:
+                          counts["ZAP alerts"] += len(
+                              site.get("alerts", []) or []
+                          )
+
+              except (OSError, ValueError, TypeError, AttributeError) as exc:
+                  warnings.append(f"{file}: {exc}")
+
+          lines += [
+              "",
+              "## Findings",
+              "",
+              "| Scanner | Count |",
+              "|---|---:|",
+          ]
+
+          for name, count in counts.items():
+              lines.append(f"| {name} | {count} |")
+
+          lines += [
+              "",
+              f"JSON reports discovered: **{reports}**",
+              "",
+              "> Counts reflect available reports only. ZAP counts represent "
+              "alerts, not individual instances. Findings are not deduplicated. "
+              "A missing report does not mean zero findings.",
+              "",
+              "## Artifacts",
+              "",
+          ]
+
+          artifacts = [
+              p for p in root.rglob("*")
+              if p.is_file()
+          ] if root.exists() else []
+
+          if artifacts:
+              for file in artifacts:
+                  lines.append(f"- `{file}`")
+          else:
+              lines.append("No report artifacts were downloaded.")
+
+          sboms = [
+              p for p in artifacts
+              if "sbom-" in p.name.lower()
+          ]
+
+          lines += [
+              "",
+              "## SBOM status",
+              "",
+              f"SBOM files available: **{len(sboms)}**",
+          ]
+
+          if warnings:
+              lines += ["", "## Parsing warnings", ""]
+              lines.extend(f"- `{warning}`" for warning in warnings)
+
+          summary_path.write_text("\n".join(lines) + "\n")
+          print(summary_path.read_text())
+          PY
+
+      - name: Upload consolidated reports
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: consolidated-security-reports
           path: scan-artifacts/
