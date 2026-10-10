@@ -1,0 +1,20 @@
+[project]
+name = "pipeline-test"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "flask",
+]
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 88
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
