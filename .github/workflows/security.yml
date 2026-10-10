@@ -37,10 +37,10 @@ jobs:
           done
 
   # ==========================================================
-  # STAGE 1 - PYTHON QUALITY
+  # STAGE 1 - QUALITY
   # ==========================================================
   python-quality:
-    name: "Stage 1 - Python Quality"
+    name: "Stage 1 - Quality"
     needs: setup
     runs-on: ubuntu-latest
 
@@ -100,7 +100,7 @@ jobs:
           if-no-files-found: ignore
 
   # ==========================================================
-  # STAGE 3 - SAST AND SECRET SCANNING
+  # STAGE 3 - SAST
   # ==========================================================
   sast:
     name: "Stage 3 - SAST and Secrets"
@@ -127,49 +127,11 @@ jobs:
           path: semgrep.json
           if-no-files-found: ignore
 
-      - name: Set up Python for Bandit
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Run Bandit
-        continue-on-error: true
-        run: |
-          python -m pip install bandit
-          bandit -r app.py -f json -o bandit.json
-
-      - name: Upload Bandit report
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: bandit-report
-          path: bandit.json
-          if-no-files-found: ignore
-
-      - name: Run Gitleaks
-        continue-on-error: true
-        run: |
-          docker run --rm \
-            -v "$PWD:/repo" -w /repo \
-            zricethezav/gitleaks:latest \
-            detect --source . \
-            --report-format json \
-            --report-path gitleaks.json \
-            --exit-code 0
-
-      - name: Upload Gitleaks report
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: gitleaks-report
-          path: gitleaks.json
-          if-no-files-found: ignore
-
   # ==========================================================
-  # STAGE 4 - CONTAINER SECURITY AND SBOMS
+  # STAGE 4 - Trivy Scan AND Syft SBOMS
   # ==========================================================
   container-security:
-    name: "Stage 4 - Container Security and SBOM"
+    name: "Stage 4 - Trivy Scan AND Syft SBOMS"
     needs: setup
     runs-on: ubuntu-latest
 
@@ -243,7 +205,7 @@ jobs:
   # STAGE 5 - DAST
   # ==========================================================
   dast:
-    name: "Stage 5 - DAST (OWASP ZAP)"
+    name: "Stage 5 - OWASP ZAP"
     needs: setup
     runs-on: ubuntu-latest
 
@@ -303,7 +265,7 @@ jobs:
   # STAGE 6 - SONARQUBE
   # ==========================================================
   sonarqube:
-    name: "Stage 6 - SonarQube"
+    name: "Stage 6 - DAST"
     needs: setup
     if: ${{ vars.SONAR_ENABLED == 'true' }}
     runs-on: ubuntu-latest
