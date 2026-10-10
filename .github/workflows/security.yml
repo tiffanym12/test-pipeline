@@ -1,6 +1,6 @@
 jobs:
   setup:
-    name: "Build Stage"
+    name: "Stage 0 - Setup"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -56,7 +56,7 @@ jobs:
           if-no-files-found: ignore
 
   sast:
-    name: "Stage 3 - SAST"
+    name: "Stage 3 - SAST and Secrets"
     needs: setup
     runs-on: ubuntu-latest
     steps:
@@ -85,7 +85,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   container-security:
-    name: "Stage 4 - Container"
+    name: "Stage 4 - Container Security and SBOM"
     needs:
       - python-quality
       - docker-lint
