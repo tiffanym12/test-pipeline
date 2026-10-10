@@ -13,7 +13,7 @@ WORKDIR /app
 # Copies the entire context
 COPY . .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv sync --frozen --no-dev
 
 EXPOSE 8080
 
