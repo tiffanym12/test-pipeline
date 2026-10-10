@@ -105,19 +105,30 @@ jobs:
   sast:
     name: "Stage 3 - SAST"
     needs: setup
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest
 
+    # steps:
+    #   - uses: actions/checkout@v6
+
+    #   - name: Run Semgrep
+    #     continue-on-error: true
+    #     run: |
+    #       docker run --rm \
+    #         -v "$PWD:/src" -w /src \
+    #         semgrep/semgrep \
+    #         semgrep scan --config auto \
+    #         --json --output semgrep.json .
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+    container:
+      image: semgrep/semgrep
+    if: (github.actor != 'dependabot[bot]')
     steps:
       - uses: actions/checkout@v6
-
-      - name: Run Semgrep
-        continue-on-error: true
-        run: |
-          docker run --rm \
-            -v "$PWD:/src" -w /src \
-            semgrep/semgrep \
-            semgrep scan --config auto \
-            --json --output semgrep.json .
+      - run: semgrep ci
 
       - name: Upload Semgrep report
         if: always()
