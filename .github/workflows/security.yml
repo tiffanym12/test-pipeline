@@ -103,7 +103,7 @@ jobs:
   # STAGE 3 - SAST
   # ==========================================================
   sast:
-    name: "Stage 3 - SAST and Secrets"
+    name: "Stage 3 - SAST"
     needs: setup
     runs-on: ubuntu-latest
 
