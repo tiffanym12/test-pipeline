@@ -142,7 +142,7 @@ jobs:
   # STAGE 4 - Trivy Scan AND Syft SBOMS
   # ==========================================================
   container-security:
-    name: "Stage 4 - Trivy Scan AND Syft SBOMS"
+    name: "Stage 4 - SBOMS"
     needs: setup
     runs-on: ubuntu-latest
 
