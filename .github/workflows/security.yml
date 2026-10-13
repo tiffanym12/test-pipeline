@@ -218,7 +218,7 @@ jobs:
   # ==========================================================
   # STAGE 5 - DAST
   # ==========================================================
-  dast:
+  zap:
     name: "Stage 5 - OWASP ZAP"
     needs: setup
     runs-on: ubuntu-latest
@@ -231,7 +231,7 @@ jobs:
 
       - name: Start application
         run: |
-          docker run -d --rm \
+          docker run -d \
             --name test-pipeline \
             -p 8080:8080 \
             test-pipeline:ci
@@ -239,17 +239,22 @@ jobs:
       - name: Wait for application
         run: |
           for i in $(seq 1 30); do
-            if curl --fail http://127.0.0.1:8080/; then
+            if [ "$(docker inspect -f '{{.State.Running}}' test-pipeline)" != "true" ]; then
+              echo "Container exited early"
+              docker logs test-pipeline
+              exit 1
+            fi
+            if curl -sf http://127.0.0.1:8080/ > /dev/null; then
+              echo "App is up"
               exit 0
             fi
             sleep 2
           done
-
           docker logs test-pipeline
           exit 1
 
       - name: Prepare report directory
-        run: mkdir -p zap-reports
+        run: mkdir -p zap-reports && chmod 777 zap-reports
 
       - name: Run ZAP baseline scan
         continue-on-error: true
