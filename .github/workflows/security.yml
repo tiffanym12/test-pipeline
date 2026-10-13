@@ -81,16 +81,19 @@ jobs:
     name: "Stage 2 - Docker Lint"
     needs: setup
     runs-on: ubuntu-latest
-
+  
     steps:
       - uses: actions/checkout@v6
-
+  
       - name: Run Hadolint
         continue-on-error: true
         run: |
-          docker run --rm -i hadolint/hadolint:latest \
-            --format json - < Dockerfile > hadolint.json
-
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            hadolint/hadolint:latest \
+            hadolint --format json Dockerfile > hadolint.json
+  
       - name: Upload Hadolint report
         if: always()
         uses: actions/upload-artifact@v6
