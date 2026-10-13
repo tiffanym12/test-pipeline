@@ -347,8 +347,8 @@ jobs:
               "Setup": os.environ["SETUP"],
               "Python quality (uv/Ruff/mypy)": os.environ["PYTHON"],
               "Docker lint (Hadolint)": os.environ["DOCKER"],
-              "SAST and secrets": os.environ["SAST"],
-              "Container security and SBOM": os.environ["CONTAINER"],
+              "SAST": os.environ["SAST"],
+              "Container security": os.environ["CONTAINER"],
               "DAST (OWASP ZAP)": os.environ["DAST"],
               "SonarQube": os.environ["SONAR"],
           }
@@ -373,11 +373,7 @@ jobs:
           counts = {
               "Hadolint findings": 0,
               "Semgrep findings": 0,
-              "Bandit findings": 0,
-              "Gitleaks findings": 0,
               "Trivy vulnerabilities": 0,
-              "Trivy misconfigurations": 0,
-              "Trivy secret findings": 0,
               "ZAP alerts": 0,
           }
 
@@ -399,25 +395,10 @@ jobs:
                           data.get("results", [])
                       )
 
-                  elif "bandit" in name:
-                      counts["Bandit findings"] += len(
-                          data.get("results", [])
-                      )
-
-                  elif "gitleaks" in name:
-                      if isinstance(data, list):
-                          counts["Gitleaks findings"] += len(data)
-
                   elif "trivy" in name:
                       for result in data.get("Results", []) or []:
                           counts["Trivy vulnerabilities"] += len(
                               result.get("Vulnerabilities") or []
-                          )
-                          counts["Trivy misconfigurations"] += len(
-                              result.get("Misconfigurations") or []
-                          )
-                          counts["Trivy secret findings"] += len(
-                              result.get("Secrets") or []
                           )
 
                   elif "zap" in name:
