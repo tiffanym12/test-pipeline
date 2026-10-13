@@ -10,6 +10,9 @@ RUN apt-get install -y curl
 
 WORKDIR /app
 
+#install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 # Copies the entire context
 COPY . .
 
